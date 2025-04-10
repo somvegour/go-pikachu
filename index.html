@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pokémon Team Rocket Chase</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            touch-action: none;
+            font-family: 'Arial', sans-serif;
+        }
+        #counter {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px #000000;
+            z-index: 100;
+        }
+        #end {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            visibility: hidden;
+            z-index: 200;
+        }
+        #end h1 {
+            font-size: 36px;
+            margin-bottom: 20px;
+            color: #ff0000;
+        }
+        #end p {
+            font-size: 24px;
+            margin-bottom: 30px;
+        }
+        #retry {
+            padding: 15px 30px;
+            font-size: 20px;
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+         }
+         .controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.horizontal-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.control-btn {
+  width: 60px;
+  height: 40px;
+  font-size: 24px;
+  font-weight: bold;
+  background-color: white;
+  color: black;
+  border: none;
+  border-radius: 3px;
+  box-shadow: 4px 4px 0 #333;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+  background-color: #f0f0f0;
+}
+
+.control-btn:active {
+  box-shadow: 2px 2px 0 #333;
+  transform: translate(2px, 2px);
+}
+
+/* Add some CSS to style the score display */
+#finalScore {
+    font-size: 28px;
+    margin-bottom: 20px;
+    color: #ffff00; /* Yellow color for score */
+    font-weight: bold;
+}
+   
+    </style>
+</head>
+<body>
+    <div id="counter">0</div>
+
+<div id="end">
+    <h1>GAME OVER</h1>
+    <p>Team Rocket caught you!</p>
+    <p id="finalScore">Score: 0</p> 
+    <button id="retry">Retry</button>
+</div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <button class="control-btn" id="forward">↑</button>
+            <div class="horizontal-controls">
+                <button class="control-btn" id="left">←</button>
+                <button class="control-btn" id="right">→</button>
+            </div>
+            <button class="control-btn" id="backward">↓</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script>
+        
+        const counterDOM = document.getElementById("counter");
+        const endDOM = document.getElementById("end");
+
+        const scene = new THREE.Scene();
+
+        const distance = 500;
+        const camera = new THREE.OrthographicCamera(
+            window.innerWidth / -2,
+            window.innerWidth / 2,
+            window.innerHeight / 2,
+            window.innerHeight / -2,
+            0.1,
+            10000
+        );
+        
+
+        camera.rotation.x = (50 * Math.PI) / 180;
+        camera.rotation.y = (20 * Math.PI) / 180;
+        camera.rotation.z = (10 * Math.PI) / 180;
+
+        const initialCameraPositionY = -Math.tan(camera.rotation.x) * distance;
+        const initialCameraPositionX =
+            Math.tan(camera.rotation.y) *
+            Math.sqrt(distance ** 2 + initialCameraPositionY ** 2);
+        camera.position.y = initialCameraPositionY;
+        camera.position.x = initialCameraPositionX;
+        camera.position.z = distance;
+
+        const zoom = 2;
+
+        const pikachuSize = 15;
+
+        const positionWidth = 42;
+        const columns = 17;
+        const boardWidth = positionWidth * columns;
+
+        const stepTime = 200; // Miliseconds it takes for the pikachu to take a step forward, backward, left or right
+
+        let lanes;
+        let currentLane;
+        let currentColumn;
+        let gameOver = false;
+
+        let previousTimestamp;
+        let startMoving;
+        let moves;
+        let stepStartTimestamp;
+
+        // Team Rocket car textures
+        const rocketCarFrontTexture = new Texture(40, 80, [{ x: 0, y: 10, w: 30, h: 60 }]);
+        const rocketCarBackTexture = new Texture(40, 80, [{ x: 10, y: 10, w: 30, h: 60 }]);
+        const rocketCarRightSideTexture = new Texture(110, 40, [
+            { x: 10, y: 0, w: 50, h: 30 },
+            { x: 70, y: 0, w: 30, h: 30 },
+        ]);
+        const rocketCarLeftSideTexture = new Texture(110, 40, [
+            { x: 10, y: 10, w: 50, h: 30 },
+            { x: 70, y: 10, w: 30, h: 30 },
+        ]);
+
+        const generateLanes = () =>
+            [-9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                .map((index) => {
+                    const lane = new Lane(index);
+                    lane.mesh.position.y = index * positionWidth * zoom;
+                    scene.add(lane.mesh);
+                    return lane;
+                })
+                .filter((lane) => lane.index >= 0);
+
+        const addLane = () => {
+            const index = lanes.length;
+            const lane = new Lane(index);
+            lane.mesh.position.y = index * positionWidth * zoom;
+            scene.add(lane.mesh);
+            lanes.push(lane);
+        };
+
+        const pikachu = new Pikachu();
+        scene.add(pikachu);
+
+        hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6);
+        scene.add(hemiLight);
+
+        const initialDirLightPositionX = -100;
+        const initialDirLightPositionY = -100;
+        dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(initialDirLightPositionX, initialDirLightPositionY, 200);
+        dirLight.castShadow = true;
+        dirLight.target = pikachu;
+        scene.add(dirLight);
+
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        var d = 500;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+
+        backLight = new THREE.DirectionalLight(0x000000, 0.4);
+        backLight.position.set(200, 200, 50);
+        backLight.castShadow = true;
+        scene.add(backLight);
+
+        const laneTypes = ["rocketCar", "rocketTruck", "meowth"];
+        const laneSpeeds = [2, 2.5, 3];
+        const rocketColors = [0xff0000, 0x000000, 0xffff00]; // Team Rocket colors: red, black, yellow
+
+        const initaliseValues = () => {
+            lanes = generateLanes();
+
+            currentLane = 0;
+            currentColumn = Math.floor(columns / 2);
+
+            previousTimestamp = null;
+
+            startMoving = false;
+            moves = [];
+            stepStartTimestamp;
+
+            pikachu.position.x = 0;
+            pikachu.position.y = 0;
+
+            camera.position.y = initialCameraPositionY;
+            camera.position.x = initialCameraPositionX;
+
+            dirLight.position.x = initialDirLightPositionX;
+            dirLight.position.y = initialDirLightPositionY;
+            
+            gameOver = false;
+            counterDOM.innerHTML = "0";
+        };
+
+        initaliseValues();
+
+        const renderer = new THREE.WebGLRenderer({
+            alpha: true,
+            antialias: true,
+        });
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        function Texture(width, height, rects) {
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext("2d");
+            context.fillStyle = "#ffffff";
+            context.fillRect(0, 0, width, height);
+            context.fillStyle = "rgba(0,0,0,0.6)";
+            rects.forEach((rect) => {
+                context.fillRect(rect.x, rect.y, rect.w, rect.h);
+            });
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function Wheel() {
+            const wheel = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(12 * zoom, 33 * zoom, 12 * zoom),
+                new THREE.MeshLambertMaterial({ color: 0x333333, flatShading: true })
+            );
+            wheel.position.z = 6 * zoom;
+            return wheel;
+        }
+
+        function RocketCar() {
+            const car = new THREE.Group();
+            const color = rocketColors[Math.floor(Math.random() * rocketColors.length)];
+
+            const main = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(60 * zoom, 30 * zoom, 15 * zoom),
+                new THREE.MeshPhongMaterial({ color, flatShading: true })
+            );
+            main.position.z = 12 * zoom;
+            main.castShadow = true;
+            main.receiveShadow = true;
+            car.add(main);
+
+            // Add Team Rocket logo
+            const logoGeometry = new THREE.CircleGeometry(10 * zoom, 32);
+            const logoMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x000000,
+                flatShading: true 
+            });
+            const logo = new THREE.Mesh(logoGeometry, logoMaterial);
+            logo.position.set(0, 0, 13 * zoom);
+            logo.rotation.y = Math.PI / 2;
+            car.add(logo);
+
+            const cabin = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(33 * zoom, 24 * zoom, 12 * zoom),
+                [
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarBackTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarFrontTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarRightSideTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarLeftSideTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true }), // top
+                    new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true }), // bottom
+                ]
+            );
+            cabin.position.x = 6 * zoom;
+            cabin.position.z = 25.5 * zoom;
+            cabin.castShadow = true;
+            cabin.receiveShadow = true;
+            car.add(cabin);
+
+            const frontWheel = new Wheel();
+            frontWheel.position.x = -18 * zoom;
+            car.add(frontWheel);
+
+            const backWheel = new Wheel();
+            backWheel.position.x = 18 * zoom;
+            car.add(backWheel);
+
+            car.castShadow = true;
+            car.receiveShadow = false;
+
+            return car;
+        }
+
+        function RocketTruck() {
+            const truck = new THREE.Group();
+            const color = rocketColors[Math.floor(Math.random() * rocketColors.length)];
+
+            const base = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(100 * zoom, 25 * zoom, 5 * zoom),
+                new THREE.MeshLambertMaterial({ color: 0x000000, flatShading: true })
+            );
+            base.position.z = 10 * zoom;
+            truck.add(base);
+
+            const cargo = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(75 * zoom, 35 * zoom, 40 * zoom),
+                new THREE.MeshPhongMaterial({ color: 0xff0000, flatShading: true })
+            );
+            cargo.position.x = 15 * zoom;
+            cargo.position.z = 30 * zoom;
+            cargo.castShadow = true;
+            cargo.receiveShadow = true;
+            truck.add(cargo);
+
+            // Add Team Rocket logo on cargo
+            const logoGeometry = new THREE.CircleGeometry(15 * zoom, 32);
+            const logoMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x000000,
+                flatShading: true 
+            });
+            const logo = new THREE.Mesh(logoGeometry, logoMaterial);
+            logo.position.set(15 * zoom, 0, 50 * zoom);
+            logo.rotation.y = Math.PI / 2;
+            truck.add(logo);
+
+            const cabin = new THREE.Mesh(
+                new THREE.BoxBufferGeometry(25 * zoom, 30 * zoom, 30 * zoom),
+                [
+                    new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true }), // back
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarFrontTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarRightSideTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({
+                        color: 0x000000,
+                        flatShading: true,
+                        map: rocketCarLeftSideTexture,
+                    }),
+                    new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true }), // top
+                    new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true }), // bottom
+                ]
+            );
+            cabin.position.x = -40 * zoom;
+            cabin.position.z = 20 * zoom;
+            cabin.castShadow = true;
+            cabin.receiveShadow = true;
+            truck.add(cabin);
+
+            const frontWheel = new Wheel();
+            frontWheel.position.x = -38 * zoom;
+            truck.add(frontWheel);
+
+            const middleWheel = new Wheel();
+            middleWheel.position.x = -10 * zoom;
+            truck.add(middleWheel);
+
+            const backWheel = new Wheel();
+            backWheel.position.x = 30 * zoom;
+            truck.add(backWheel);
+
+            return truck;
+        }
+
+        function Meowth() {
+            const meowth = new THREE.Group();
+
+            // Body (cream color)
+            const body = new THREE.Mesh(
+                new THREE.SphereGeometry(15 * zoom * 0.8, 32, 32),
+                new THREE.MeshPhongMaterial({ color: 0xfff9d5, flatShading: true })
+            );
+            body.position.z = 10 * zoom;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            meowth.add(body);
+
+            // Head (slightly larger sphere)
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(15 * zoom * 0.6, 32, 32),
+                new THREE.MeshPhongMaterial({ color: 0xfff9d5, flatShading: true })
+            );
+            head.position.z = 20 * zoom;
+            head.position.y = -5 * zoom;
+            head.castShadow = true;
+            head.receiveShadow = true;
+            meowth.add(head);
+
+            // Ears
+            const earGeometry = new THREE.ConeGeometry(5 * zoom, 10 * zoom, 32);
+            const leftEar = new THREE.Mesh(
+                earGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xfff9d5, flatShading: true })
+            );
+            leftEar.position.set(-8 * zoom, -10 * zoom, 25 * zoom);
+            leftEar.rotation.x = -0.5;
+            leftEar.rotation.z = -0.5;
+            meowth.add(leftEar);
+
+            const rightEar = new THREE.Mesh(
+                earGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xfff9d5, flatShading: true })
+            );
+            rightEar.position.set(8 * zoom, -10 * zoom, 25 * zoom);
+            rightEar.rotation.x = -0.5;
+            rightEar.rotation.z = 0.5;
+            meowth.add(rightEar);
+
+            // Eyes (slanted)
+            const eyeGeometry = new THREE.SphereGeometry(2 * zoom, 16, 16);
+            const leftEye = new THREE.Mesh(
+                eyeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            leftEye.position.set(-5 * zoom, -8 * zoom, 22 * zoom);
+            meowth.add(leftEye);
+
+            const rightEye = new THREE.Mesh(
+                eyeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            rightEye.position.set(5 * zoom, -8 * zoom, 22 * zoom);
+            meowth.add(rightEye);
+
+            // Nose (small pink triangle)
+            const noseGeometry = new THREE.ConeGeometry(1 * zoom, 3 * zoom, 3);
+            const nose = new THREE.Mesh(
+                noseGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xffb6c1, flatShading: true })
+            );
+            nose.position.set(0, -7 * zoom, 20 * zoom);
+            nose.rotation.x = Math.PI / 2;
+            meowth.add(nose);
+
+            // Mouth (simple curve)
+            const mouth = new THREE.Mesh(
+                new THREE.TorusGeometry(3 * zoom, 0.5 * zoom, 16, 32, Math.PI),
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            mouth.position.set(0, -10 * zoom, 18 * zoom);
+            mouth.rotation.x = Math.PI;
+            meowth.add(mouth);
+
+            // Whiskers
+            const whiskerGeometry = new THREE.CylinderGeometry(0.3 * zoom, 0.3 * zoom, 8 * zoom, 8);
+            const leftWhisker1 = new THREE.Mesh(
+                whiskerGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            leftWhisker1.position.set(-5 * zoom, -8 * zoom, 18 * zoom);
+            leftWhisker1.rotation.z = Math.PI / 6;
+            meowth.add(leftWhisker1);
+
+            const leftWhisker2 = new THREE.Mesh(
+                whiskerGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            leftWhisker2.position.set(-5 * zoom, -8 * zoom, 18 * zoom);
+            leftWhisker2.rotation.z = -Math.PI / 6;
+            meowth.add(leftWhisker2);
+
+            const rightWhisker1 = new THREE.Mesh(
+                whiskerGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            rightWhisker1.position.set(5 * zoom, -8 * zoom, 18 * zoom);
+            rightWhisker1.rotation.z = Math.PI / 6;
+            meowth.add(rightWhisker1);
+
+            const rightWhisker2 = new THREE.Mesh(
+                whiskerGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            rightWhisker2.position.set(5 * zoom, -8 * zoom, 18 * zoom);
+            rightWhisker2.rotation.z = -Math.PI / 6;
+            meowth.add(rightWhisker2);
+
+            // Coin on forehead
+            const coinGeometry = new THREE.CylinderGeometry(3 * zoom, 3 * zoom, 1 * zoom, 32);
+            const coin = new THREE.Mesh(
+                coinGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xffd700, flatShading: true })
+            );
+            coin.position.set(0, -5 * zoom, 25 * zoom);
+            coin.rotation.x = Math.PI / 2;
+            meowth.add(coin);
+
+            return meowth;
+        }
+
+        function Pikachu() {
+            const pikachu = new THREE.Group();
+
+            // Body (yellow)
+            const body = new THREE.Mesh(
+                new THREE.SphereGeometry(pikachuSize * zoom * 0.8, 32, 32),
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            body.position.z = 10 * zoom;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            pikachu.add(body);
+
+            // Head (slightly larger sphere)
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(pikachuSize * zoom * 0.6, 32, 32),
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            head.position.z = 20 * zoom;
+            head.position.y = -5 * zoom;
+            head.castShadow = true;
+            head.receiveShadow = true;
+            pikachu.add(head);
+
+            // Ears
+            const earGeometry = new THREE.ConeGeometry(5 * zoom, 15 * zoom, 32);
+            const leftEar = new THREE.Mesh(
+                earGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            leftEar.position.set(-8 * zoom, -10 * zoom, 25 * zoom);
+            leftEar.rotation.x = -0.5;
+            leftEar.rotation.z = -0.5;
+            pikachu.add(leftEar);
+
+            const rightEar = new THREE.Mesh(
+                earGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            rightEar.position.set(8 * zoom, -10 * zoom, 25 * zoom);
+            rightEar.rotation.x = -0.5;
+            rightEar.rotation.z = 0.5;
+            pikachu.add(rightEar);
+
+            // Black ear tips
+            const earTipGeometry = new THREE.ConeGeometry(3 * zoom, 5 * zoom, 32);
+            const leftEarTip = new THREE.Mesh(
+                earTipGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            leftEarTip.position.set(-8 * zoom, -15 * zoom, 35 * zoom);
+            leftEarTip.rotation.x = -0.5;
+            leftEarTip.rotation.z = -0.5;
+            pikachu.add(leftEarTip);
+
+            const rightEarTip = new THREE.Mesh(
+                earTipGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            rightEarTip.position.set(8 * zoom, -15 * zoom, 35 * zoom);
+            rightEarTip.rotation.x = -0.5;
+            rightEarTip.rotation.z = 0.5;
+            pikachu.add(rightEarTip);
+
+            // Eyes
+            const eyeGeometry = new THREE.SphereGeometry(2 * zoom, 16, 16);
+            const leftEye = new THREE.Mesh(
+                eyeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            leftEye.position.set(-5 * zoom, -8 * zoom, 22 * zoom);
+            pikachu.add(leftEye);
+
+            const rightEye = new THREE.Mesh(
+                eyeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            rightEye.position.set(5 * zoom, -8 * zoom, 22 * zoom);
+            pikachu.add(rightEye);
+
+            // Cheeks (red circles)
+            const cheekGeometry = new THREE.SphereGeometry(3 * zoom, 16, 16);
+            const leftCheek = new THREE.Mesh(
+                cheekGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xff6b6b, flatShading: true })
+            );
+            leftCheek.position.set(-10 * zoom, -5 * zoom, 18 * zoom);
+            pikachu.add(leftCheek);
+
+            const rightCheek = new THREE.Mesh(
+                cheekGeometry,
+                new THREE.MeshPhongMaterial({ color: 0xff6b6b, flatShading: true })
+            );
+            rightCheek.position.set(10 * zoom, -5 * zoom, 18 * zoom);
+            pikachu.add(rightCheek);
+
+            // Nose (small black triangle)
+            const noseGeometry = new THREE.ConeGeometry(1 * zoom, 3 * zoom, 3);
+            const nose = new THREE.Mesh(
+                noseGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            nose.position.set(0, -7 * zoom, 20 * zoom);
+            nose.rotation.x = Math.PI / 2;
+            pikachu.add(nose);
+
+            // Mouth (simple curve)
+            const mouth = new THREE.Mesh(
+                new THREE.TorusGeometry(3 * zoom, 0.5 * zoom, 16, 32, Math.PI),
+                new THREE.MeshPhongMaterial({ color: 0x000000, flatShading: true })
+            );
+            mouth.position.set(0, -10 * zoom, 18 * zoom);
+            mouth.rotation.x = Math.PI;
+            pikachu.add(mouth);
+
+            // Tail (lightning bolt shape)
+            const tail = new THREE.Group();
+            const tailPart1 = new THREE.Mesh(
+                new THREE.BoxGeometry(5 * zoom, 15 * zoom, 5 * zoom),
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            tailPart1.position.set(0, 15 * zoom, 10 * zoom);
+            tailPart1.rotation.z = Math.PI / 4;
+            tail.add(tailPart1);
+
+            const tailPart2 = new THREE.Mesh(
+                new THREE.BoxGeometry(5 * zoom, 10 * zoom, 5 * zoom),
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            tailPart2.position.set(7 * zoom, 20 * zoom, 10 * zoom);
+            tailPart2.rotation.z = -Math.PI / 4;
+            tail.add(tailPart2);
+
+            const tailPart3 = new THREE.Mesh(
+                new THREE.BoxGeometry(5 * zoom, 10 * zoom, 5 * zoom),
+                new THREE.MeshPhongMaterial({ color: 0xffde00, flatShading: true })
+            );
+            tailPart3.position.set(12 * zoom, 15 * zoom, 10 * zoom);
+            tailPart3.rotation.z = Math.PI / 4;
+            tail.add(tailPart3);
+
+            tail.position.set(-15 * zoom, 0, 10 * zoom);
+            tail.rotation.z = -Math.PI / 6;
+            pikachu.add(tail);
+
+            // Stripes on back
+            const stripeGeometry = new THREE.BoxGeometry(20 * zoom, 3 * zoom, 2 * zoom);
+            const stripe1 = new THREE.Mesh(
+                stripeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x8b7500, flatShading: true })
+            );
+            stripe1.position.set(0, 5 * zoom, 10 * zoom);
+            stripe1.rotation.z = Math.PI / 6;
+            pikachu.add(stripe1);
+
+            const stripe2 = new THREE.Mesh(
+                stripeGeometry,
+                new THREE.MeshPhongMaterial({ color: 0x8b7500, flatShading: true })
+            );
+            stripe2.position.set(0, 0, 10 * zoom);
+            stripe2.rotation.z = -Math.PI / 6;
+            pikachu.add(stripe2);
+
+            return pikachu;
+        }
+
+        function Road() {
+            const road = new THREE.Group();
+
+            const createSection = (color) =>
+                new THREE.Mesh(
+                    new THREE.PlaneBufferGeometry(boardWidth * zoom, positionWidth * zoom),
+                    new THREE.MeshPhongMaterial({ color })
+                );
+
+            const middle = createSection(0x454a59);
+            middle.receiveShadow = true;
+            road.add(middle);
+
+            const left = createSection(0x393d49);
+            left.position.x = -boardWidth * zoom;
+            road.add(left);
+
+            const right = createSection(0x393d49);
+            right.position.x = boardWidth * zoom;
+            road.add(right);
+
+            return road;
+        }
+
+        function Grass() {
+            const grass = new THREE.Group();
+
+            const createSection = (color) =>
+                new THREE.Mesh(
+                    new THREE.BoxBufferGeometry(
+                        boardWidth * zoom,
+                        positionWidth * zoom,
+                        3 * zoom
+                    ),
+                    new THREE.MeshPhongMaterial({ color })
+                );
+
+            const middle = createSection(0xbaf455);
+            middle.receiveShadow = true;
+            grass.add(middle);
+
+            const left = createSection(0x99c846);
+            left.position.x = -boardWidth * zoom;
+            grass.add(left);
+
+            const right = createSection(0x99c846);
+            right.position.x = boardWidth * zoom;
+            grass.add(right);
+
+            grass.position.z = 1.5 * zoom;
+            return grass;
+        }
+
+        function Lane(index) {
+            this.index = index;
+            this.type =
+                index <= 0
+                    ? "field"
+                    : laneTypes[Math.floor(Math.random() * laneTypes.length)];
+
+            switch (this.type) {
+                case "field": {
+                    this.type = "field";
+                    this.mesh = new Grass();
+                    break;
+                }
+                case "meowth": {
+                    this.mesh = new Grass();
+
+                    this.occupiedPositions = new Set();
+                    this.meowths = [1, 2, 3, 4].map(() => {
+                        const meowth = new Meowth();
+                        let position;
+                        do {
+                            position = Math.floor(Math.random() * columns);
+                        } while (this.occupiedPositions.has(position));
+                        this.occupiedPositions.add(position);
+                        meowth.position.x =
+                            (position * positionWidth + positionWidth / 2) * zoom -
+                            (boardWidth * zoom) / 2;
+                        this.mesh.add(meowth);
+                        return meowth;
+                    });
+                    break;
+                }
+                case "rocketCar": {
+                    this.mesh = new Road();
+                    this.direction = Math.random() >= 0.5;
+
+                    const occupiedPositions = new Set();
+                    this.vechicles = [1, 2, 3].map(() => {
+                        const vechicle = new RocketCar();
+                        let position;
+                        do {
+                            position = Math.floor((Math.random() * columns) / 2);
+                        } while (occupiedPositions.has(position));
+                        occupiedPositions.add(position);
+                        vechicle.position.x =
+                            (position * positionWidth * 2 + positionWidth / 2) * zoom -
+                            (boardWidth * zoom) / 2;
+                        if (!this.direction) vechicle.rotation.z = Math.PI;
+                        this.mesh.add(vechicle);
+                        return vechicle;
+                    });
+
+                    this.speed = laneSpeeds[Math.floor(Math.random() * laneSpeeds.length)];
+                    break;
+                }
+                case "rocketTruck": {
+                    this.mesh = new Road();
+                    this.direction = Math.random() >= 0.5;
+
+                    const occupiedPositions = new Set();
+                    this.vechicles = [1, 2].map(() => {
+                        const vechicle = new RocketTruck();
+                        let position;
+                        do {
+                            position = Math.floor((Math.random() * columns) / 3);
+                        } while (occupiedPositions.has(position));
+                        occupiedPositions.add(position);
+                        vechicle.position.x =
+                            (position * positionWidth * 3 + positionWidth / 2) * zoom -
+                            (boardWidth * zoom) / 2;
+                        if (!this.direction) vechicle.rotation.z = Math.PI;
+                        this.mesh.add(vechicle);
+                        return vechicle;
+                    });
+
+                    this.speed = laneSpeeds[Math.floor(Math.random() * laneSpeeds.length)];
+                    break;
+                }
+            }
+        }
+
+        document.querySelector("#retry").addEventListener("click", () => {
+            lanes.forEach((lane) => scene.remove(lane.mesh));
+            initaliseValues();
+            endDOM.style.visibility = "hidden";
+        });
+
+        document
+            .getElementById("forward")
+            .addEventListener("click", () => move("forward"));
+
+        document
+            .getElementById("backward")
+            .addEventListener("click", () => move("backward"));
+
+        document.getElementById("left").addEventListener("click", () => move("left"));
+
+        document.getElementById("right").addEventListener("click", () => move("right"));
+
+        // Touch event handlers for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, false);
+
+        document.addEventListener('touchend', (e) => {
+            if (gameOver) return;
+            
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            const dx = touchEndX - touchStartX;
+            const dy = touchEndY - touchStartY;
+            
+            // Determine the primary direction of the swipe
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 0) {
+                    move("right");
+                } else {
+                    move("left");
+                }
+            } else {
+                if (dy > 0) {
+                    move("backward");
+                } else {
+                    move("forward");
+                }
+            }
+        }, false);
+
+        window.addEventListener("keydown", (event) => {
+            if (gameOver) return;
+            
+            if (event.keyCode == "38") {
+                // up arrow
+                move("forward");
+            } else if (event.keyCode == "40") {
+                // down arrow
+                move("backward");
+            } else if (event.keyCode == "37") {
+                // left arrow
+                move("left");
+            } else if (event.keyCode == "39") {
+                // right arrow
+                move("right");
+            }
+        });
+
+        function move(direction) {
+            if (gameOver) return;
+            
+            const finalPositions = moves.reduce(
+                (position, move) => {
+                    if (move === "forward")
+                        return { lane: position.lane + 1, column: position.column };
+                    if (move === "backward")
+                        return { lane: position.lane - 1, column: position.column };
+                    if (move === "left")
+                        return { lane: position.lane, column: position.column - 1 };
+                    if (move === "right")
+                        return { lane: position.lane, column: position.column + 1 };
+                },
+                { lane: currentLane, column: currentColumn }
+            );
+
+            if (direction === "forward") {
+                if (
+                    lanes[finalPositions.lane + 1].type === "meowth" &&
+                    lanes[finalPositions.lane + 1].occupiedPositions.has(
+                        finalPositions.column
+                    )
+                )
+                    return;
+                if (!stepStartTimestamp) startMoving = true;
+                addLane();
+            } else if (direction === "backward") {
+                if (finalPositions.lane === 0) return;
+                if (
+                    lanes[finalPositions.lane - 1].type === "meowth" &&
+                    lanes[finalPositions.lane - 1].occupiedPositions.has(
+                        finalPositions.column
+                    )
+                )
+                    return;
+                if (!stepStartTimestamp) startMoving = true;
+            } else if (direction === "left") {
+                if (finalPositions.column === 0) return;
+                if (
+                    lanes[finalPositions.lane].type === "meowth" &&
+                    lanes[finalPositions.lane].occupiedPositions.has(
+                        finalPositions.column - 1
+                    )
+                )
+                    return;
+                if (!stepStartTimestamp) startMoving = true;
+            } else if (direction === "right") {
+                if (finalPositions.column === columns - 1) return;
+                if (
+                    lanes[finalPositions.lane].type === "meowth" &&
+                    lanes[finalPositions.lane].occupiedPositions.has(
+                        finalPositions.column + 1
+                    )
+                )
+                    return;
+                if (!stepStartTimestamp) startMoving = true;
+            }
+            moves.push(direction);
+        }
+
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+
+            if (!previousTimestamp) previousTimestamp = timestamp;
+            const delta = timestamp - previousTimestamp;
+            previousTimestamp = timestamp;
+
+            // Animate cars and trucks moving on the lane
+            lanes.forEach((lane) => {
+                if (lane.type === "rocketCar" || lane.type === "rocketTruck") {
+                    lane.speed = 2 + currentLane * 0.4; // Increase speed with score
+
+                    const aBitBeforeTheBeginingOfLane =
+                        (-boardWidth * zoom) / 2 - positionWidth * 2 * zoom;
+                    const aBitAfterTheEndOFLane =
+                        (boardWidth * zoom) / 2 + positionWidth * 2 * zoom;
+                    lane.vechicles.forEach((vechicle) => {
+                        if (lane.direction) {
+                            vechicle.position.x =
+                                vechicle.position.x < aBitBeforeTheBeginingOfLane
+                                    ? aBitAfterTheEndOFLane
+                                    : (vechicle.position.x -= (lane.speed / 16) * delta);
+                        } else {
+                            vechicle.position.x =
+                                vechicle.position.x > aBitAfterTheEndOFLane
+                                    ? aBitBeforeTheBeginingOfLane
+                                    : (vechicle.position.x += (lane.speed / 16) * delta);
+                        }
+                    });
+                }
+            });
+
+            if (startMoving) {
+                stepStartTimestamp = timestamp;
+                startMoving = false;
+            }
+
+            if (stepStartTimestamp) {
+                const moveDeltaTime = timestamp - stepStartTimestamp;
+                const moveDeltaDistance =
+                    Math.min(moveDeltaTime / stepTime, 1) * positionWidth * zoom;
+                const jumpDeltaDistance =
+                    Math.sin(Math.min(moveDeltaTime / stepTime, 1) * Math.PI) * 8 * zoom;
+                switch (moves[0]) {
+                    case "forward": {
+                        const positionY =
+                            currentLane * positionWidth * zoom + moveDeltaDistance;
+                        camera.position.y = initialCameraPositionY + positionY;
+                        dirLight.position.y = initialDirLightPositionY + positionY;
+                        pikachu.position.y = positionY;
+
+                        pikachu.position.z = jumpDeltaDistance;
+                        break;
+                    }
+                    case "backward": {
+                        positionY = currentLane * positionWidth * zoom - moveDeltaDistance;
+                        camera.position.y = initialCameraPositionY + positionY;
+                        dirLight.position.y = initialDirLightPositionY + positionY;
+                        pikachu.position.y = positionY;
+
+                        pikachu.position.z = jumpDeltaDistance;
+                        break;
+                    }
+                    case "left": {
+                        const positionX =
+                            (currentColumn * positionWidth + positionWidth / 2) * zoom -
+                            (boardWidth * zoom) / 2 -
+                            moveDeltaDistance;
+                        camera.position.x = initialCameraPositionX + positionX;
+                        dirLight.position.x = initialDirLightPositionX + positionX;
+                        pikachu.position.x = positionX;
+                        pikachu.position.z = jumpDeltaDistance;
+                        break;
+                    }
+                    case "right": {
+                        const positionX =
+                            (currentColumn * positionWidth + positionWidth / 2) * zoom -
+                            (boardWidth * zoom) / 2 +
+                            moveDeltaDistance;
+                        camera.position.x = initialCameraPositionX + positionX;
+                        dirLight.position.x = initialDirLightPositionX + positionX;
+                        pikachu.position.x = positionX;
+
+                        pikachu.position.z = jumpDeltaDistance;
+                        break;
+                    }
+                }
+                // Once a step has ended
+                if (moveDeltaTime > stepTime) {
+                    switch (moves[0]) {
+                        case "forward": {
+                            currentLane++;
+                            counterDOM.innerHTML = currentLane;
+                            break;
+                        }
+                        case "backward": {
+                            currentLane--;
+                            counterDOM.innerHTML = currentLane;
+                            break;
+                        }
+                        case "left": {
+                            currentColumn--;
+                            break;
+                        }
+                        case "right": {
+                            currentColumn++;
+                            break;
+                        }
+                    }
+                    moves.shift();
+                    // If more steps are to be taken then restart counter otherwise stop stepping
+                    stepStartTimestamp = moves.length === 0 ? null : timestamp;
+                }
+            }
+
+            // Hit test
+            if (
+                !gameOver &&
+                (lanes[currentLane].type === "rocketCar" || lanes[currentLane].type === "rocketTruck")
+            ) {
+                const pikachuMinX = pikachu.position.x - (pikachuSize * zoom) / 2;
+                const pikachuMaxX = pikachu.position.x + (pikachuSize * zoom) / 2;
+                const vechicleLength = { rocketCar: 60, rocketTruck: 105 }[lanes[currentLane].type];
+                lanes[currentLane].vechicles.forEach((vechicle) => {
+                    const carMinX = vechicle.position.x - (vechicleLength * zoom) / 2;
+                    const carMaxX = vechicle.position.x + (vechicleLength * zoom) / 2;
+                    if (pikachuMaxX > carMinX && pikachuMinX < carMaxX) {
+                        gameOver = true;
+                        endDOM.style.visibility = "visible";
+
+if (pikachuMaxX > carMinX && pikachuMinX < carMaxX) {
+    gameOver = true;
+    document.getElementById("finalScore").textContent = "Score: " + currentLane;
+    endDOM.style.visibility = "visible";
+}
+                    }
+                });
+            }
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.left = window.innerWidth / -2;
+            camera.right = window.innerWidth / 2;
+            camera.top = window.innerHeight / 2;
+            camera.bottom = window.innerHeight / -2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
